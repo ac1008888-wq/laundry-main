@@ -130,12 +130,19 @@ DB_NAME=laundry.db
 MACHINE_DEFAULT_TIME=2700
 SMTP_HOST=...
 SMTP_PORT=587
+SMTP_SECURE=false
 SMTP_USER=...
 SMTP_PASS=...
 SMTP_FROM=...
 EMAIL_DISABLED=false
 ```
 Never commit `.env` (it's gitignored). Use the host's secret manager.
+
+For SMTP port `465`, set `SMTP_SECURE=true` (it is inferred when unset); for
+port `587`, use `SMTP_SECURE=false`. If the verification endpoint returns
+"Could not deliver the verification email", check the server logs for the
+`[Email] Verification email delivery failed` error and verify the host, port,
+credentials/app password, and sender address with your mail provider.
 
 ### 3.4 Static assets / SPA fallback
 - Production serves `dist/` via `express.static` and falls back to

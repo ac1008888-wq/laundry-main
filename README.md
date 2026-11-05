@@ -94,6 +94,8 @@ Set these in Railway > Service > Variables (no quotes around values):
 - DB_NAME (optional, default laundry.db)
 - SQLITE_PATH (optional, default laundry.db)
 - MACHINE_DEFAULT_TIME (optional, default 2700)
+- SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM (required for verification emails)
+- SMTP_SECURE (optional; defaults to `true` for port 465, otherwise `false`)
 
 ## Database
 

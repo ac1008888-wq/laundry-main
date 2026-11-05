@@ -1171,10 +1171,14 @@ async function startServer() {
   const emailTransporter = (() => {
     const host = process.env.SMTP_HOST;
     if (!host) return null;
+    const port = parseInt(process.env.SMTP_PORT || "587", 10);
+    const secure = process.env.SMTP_SECURE === undefined
+      ? port === 465
+      : process.env.SMTP_SECURE === "true";
     return nodemailer.createTransport({
       host,
-      port: parseInt(process.env.SMTP_PORT || "587", 10),
-      secure: process.env.SMTP_SECURE === "true",
+      port,
+      secure,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
       connectionTimeout: 10000,
       socketTimeout: 10000,
