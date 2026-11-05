@@ -3326,20 +3326,19 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                               </div>
                             )}
                             <div className="flex items-center gap-2">
-                              <input
-                                type="range"
-                                min="0"
-                                max="3600"
-                                step="30"
-                                value={timerValue}
-                                onChange={(e) => {
-                                  updateMachineTimer(m, timerField, parseInt(e.target.value));
-                                }}
-                                onPointerUp={(e) => {
-                                  updateMachineTimer(m, timerField, parseInt(e.currentTarget.value), true);
-                                }}
-                                className="flex-1 h-2 bg-zinc-100 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                              />
+                              <div
+                                role="progressbar"
+                                aria-label={`${timerLabel} remaining`}
+                                aria-valuemin={0}
+                                aria-valuemax={3600}
+                                aria-valuenow={Math.max(0, Math.min(3600, timerValue))}
+                                className="flex-1 h-2 bg-zinc-100 rounded-lg overflow-hidden"
+                              >
+                                <div
+                                  className="h-full bg-blue-500 rounded-lg transition-[width]"
+                                  style={{ width: `${Math.max(0, Math.min(100, (timerValue / 3600) * 100))}%` }}
+                                />
+                              </div>
                               <span className="text-xs font-mono text-zinc-500 w-16 text-right">
                                 {formatTime(timerValue)}
                               </span>

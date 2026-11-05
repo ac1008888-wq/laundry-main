@@ -1181,11 +1181,14 @@ async function startServer() {
     });
   })();
 
-   app.post("/api/verify-email/send", (req, res) => {
+   app.post("/api/verify-email/send", async (req, res) => {
      try {
        const email = String(req.body?.email || "").trim();
        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
          return res.status(400).json(apiResponse(false, undefined, "Invalid email"));
+       }
+       if (!emailTransporter) {
+         return res.status(503).json(apiResponse(false, undefined, "Email delivery is not configured. Please contact the laundry shop."));
        }
        // Per-email rate limiting: max 3 codes per 10 minutes
        const recent = db.prepare("SELECT COUNT(*) as c FROM email_verifications WHERE email = ? AND created_at >= datetime('now', '-10 minutes')").get(email) as { c: number };
@@ -1195,16 +1198,18 @@ async function startServer() {
        const code = String(Math.floor(100000 + Math.random() * 900000));
        const codeHash = crypto.createHash('sha256').update(code).digest('hex');
        const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-        db.prepare("INSERT INTO email_verifications (email, token, expires_at) VALUES (?, ?, ?)").run(email, codeHash, expires);
-       if (emailTransporter) {
-         emailTransporter.sendMail({
+       const result = db.prepare("INSERT INTO email_verifications (email, token, expires_at) VALUES (?, ?, ?)").run(email, codeHash, expires);
+       try {
+         await emailTransporter.sendMail({
            from: process.env.SMTP_FROM || process.env.SMTP_USER,
            to: email,
            subject: "Your verification code",
            text: `Your verification code is: ${code}. It expires in 10 minutes.`,
-         }).catch((e) => console.error("[Email] send failed:", e));
-       } else {
-         console.log(`[Email] Verification code for ${email}: ${code} (SMTP not configured)`);
+         });
+       } catch (error) {
+         db.prepare("UPDATE email_verifications SET verified = 1 WHERE id = ?").run(result.lastInsertRowid);
+         console.error("[Email] Verification email delivery failed:", error);
+         return res.status(502).json(apiResponse(false, undefined, "Could not deliver the verification email. Please try again later."));
        }
        res.json(apiResponse(true, { sent: true }));
      } catch (e) {
