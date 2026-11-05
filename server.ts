@@ -1133,7 +1133,7 @@ async function startServer() {
     } else {
       // Production mode - serve static files from build/ (fall back to dist/ if absent).
       // Guarded so an API-only deployment (no frontend build) does not crash.
-      const fsSync = require("node:fs");
+      const fsSync = fs;
       let staticDir = path.join(__dirname, "build");
       if (!fsSync.existsSync(staticDir)) {
         staticDir = path.join(__dirname, "dist");
