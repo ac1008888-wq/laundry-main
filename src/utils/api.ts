@@ -143,7 +143,7 @@ export const createTransaction = async (data: Omit<Transaction, 'id' | 'created_
   return extractData<Transaction>(res);
 };
 
-export const createWalkInOrder = async (data: any): Promise<Transaction> => {
+export const createWalkInOrder = async (data: any): Promise<Transaction[]> => {
   const res = await fetchWithRetry(`${API_BASE}/admin/transactions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -154,7 +154,8 @@ export const createWalkInOrder = async (data: any): Promise<Transaction> => {
     const json = await res.json();
     throw new Error(json.error || 'Failed to create walk-in order');
   }
-  return extractData<Transaction>(res);
+  const transactions = await extractData<Transaction | Transaction[]>(res);
+  return Array.isArray(transactions) ? transactions : [transactions];
 };
 
 export const adminLogin = async (username: string, password: string): Promise<{ token: string; user: { id: number; username: string; role: string; last_login: string | null } }> => {

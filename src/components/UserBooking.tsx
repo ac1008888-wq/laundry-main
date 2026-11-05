@@ -195,7 +195,7 @@ const UserBooking = () => {
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [formData.delivery_method, formData.address, dynamicPricing]);
-  const [bookedTransaction, setBookedTransaction] = useState<Transaction | null>(null);
+  const [bookedTransactions, setBookedTransactions] = useState<Transaction[] | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
 
   useEffect(() => {
@@ -344,7 +344,7 @@ const UserBooking = () => {
       const data = await res.json();
 
       if (data.success && data.data) {
-        setBookedTransaction(data.data);
+        setBookedTransactions(Array.isArray(data.data) ? data.data : [data.data]);
         setShowConfirmation(false);
         clearPersisted();
         window.dispatchEvent(new CustomEvent('order-created'));
@@ -364,91 +364,87 @@ const UserBooking = () => {
     setItems([{ service_type: LAUNDRY_SERVICE, quantity: 1 }]);
     setStep(1);
     setFormErrors({});
-    setBookedTransaction(null);
+    setBookedTransactions(null);
     setShowConfirmation(false);
     clearPersisted();
   };
 
-  if (bookedTransaction) {
+  if (bookedTransactions) {
     return (
       <div className="max-w-2xl mx-auto mt-8 sm:mt-12 p-6 sm:p-10 bg-white rounded-[32px] sm:rounded-[40px] shadow-2xl border-4 sm:border-8 border-zinc-50">
-        <div id="booking-receipt" style={{ display: 'none' }}>
-          <Receipt transaction={{ ...bookedTransaction, total_price: bookedTransaction.total_price }} type="booking" />
-        </div>
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle2 className="text-emerald-600 w-10 h-10" />
           </div>
-          <h2 className="text-3xl font-black text-zinc-900 mb-2 tracking-tighter">BOOKING SUBMITTED!</h2>
-          <p className="text-zinc-500 font-medium">Your laundry is in good hands.</p>
+          <h2 className="text-3xl font-black text-zinc-900 mb-2 tracking-tighter">ORDER{bookedTransactions.length > 1 ? 'S' : ''} SUBMITTED!</h2>
+          <p className="text-zinc-500 font-medium">Each service has its own order, reference, machine, and timer.</p>
         </div>
 
-        <div className="bg-zinc-50 rounded-3xl p-8 mb-8 border-2 border-zinc-100">
-          <div className="flex justify-between items-center mb-6 pb-6 border-b border-zinc-200">
-            <div>
-              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Reference ID</p>
-              <p className="text-2xl font-mono font-black text-blue-600">{bookedTransaction.reference_number}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Date</p>
-              <p className="font-bold text-zinc-900">{new Date(bookedTransaction.created_at).toLocaleDateString()}</p>
-            </div>
-          </div>
+        <div className="space-y-4 mb-8">
+          {bookedTransactions.map((transaction, index) => (
+            <div key={transaction.id} className="bg-zinc-50 rounded-3xl p-6 sm:p-8 border-2 border-zinc-100">
+              <div id={`booking-receipt-${index}`} style={{ display: 'none' }}>
+                <Receipt transaction={transaction} type="booking" />
+              </div>
+              <div className="flex justify-between items-center mb-5 pb-5 border-b border-zinc-200">
+                <div>
+                  <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Order {index + 1} · Reference ID</p>
+                  <p className="text-xl font-mono font-black text-blue-600">{transaction.reference_number}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Date</p>
+                  <p className="font-bold text-zinc-900">{new Date(transaction.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:gap-8 mb-8">
-            <div>
-              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Customer</p>
-              <p className="font-bold text-zinc-900">{bookedTransaction.customer_name}</p>
-              <p className="text-sm text-zinc-500">{bookedTransaction.customer_phone}</p>
-            </div>
-            <div>
-              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Appointment</p>
-              <p className="font-bold text-zinc-900">{bookedTransaction.appointment_date}</p>
-              <p className="text-sm text-zinc-500">{bookedTransaction.appointment_time}</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {bookedTransaction.items && bookedTransaction.items.length > 0 && (
-              <div className="space-y-2">
-                {bookedTransaction.items.map((it, i) => (
-                  <div key={i} className="flex justify-between items-center">
-                    <p className="text-zinc-500 font-medium">{it.service_type} × {it.quantity}</p>
-                    <p className="font-bold text-zinc-900">Qty {it.quantity}</p>
+              <div className="grid grid-cols-2 gap-4 sm:gap-8 mb-5">
+                <div>
+                  <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Service</p>
+                  <p className="font-bold text-zinc-900">{transaction.service_type} × {transaction.quantity}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Appointment</p>
+                  <p className="font-bold text-zinc-900">{transaction.appointment_date}</p>
+                  <p className="text-sm text-zinc-500">{transaction.appointment_time}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Customer</p>
+                  <p className="font-bold text-zinc-900">{transaction.customer_name}</p>
+                  <p className="text-sm text-zinc-500">{transaction.customer_phone}</p>
+                </div>
+                {transaction.delivery_fee > 0 && (
+                  <div>
+                    <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Delivery fee</p>
+                    <p className="font-bold text-zinc-900">₱{transaction.delivery_fee.toFixed(2)} (charged once)</p>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-            <div className="flex justify-between items-center">
-              <p className="text-zinc-500 font-medium">Total quantity: {bookedTransaction.quantity} load(s)</p>
-              <p className="font-bold text-amber-600 text-sm">Pricing pending admin review</p>
-            </div>
-            {bookedTransaction.special_instructions && (
-              <div className="bg-white p-4 rounded-2xl border border-zinc-100 italic text-sm text-zinc-500">
-                " {bookedTransaction.special_instructions} "
+
+              {transaction.special_instructions && (
+                <div className="bg-white p-4 rounded-2xl border border-zinc-100 italic text-sm text-zinc-500 mb-5">
+                  "{transaction.special_instructions}"
+                </div>
+              )}
+              <div className="pt-4 border-t border-zinc-200 flex justify-between items-center">
+                <p className="font-black text-zinc-900 uppercase tracking-widest text-sm">Amount</p>
+                <p className="font-bold text-amber-600 text-sm">Pending admin review</p>
               </div>
-            )}
-            <div className="pt-4 border-t border-zinc-200 flex justify-between items-center">
-              <p className="font-black text-zinc-900 uppercase tracking-widest text-sm">Total Amount</p>
-              <p className="text-xl font-black text-amber-600">Pending admin review</p>
+              <button
+                onClick={() => { setTimeout(() => printReceipt(`booking-receipt-${index}`), 100); }}
+                className="mt-5 w-full py-3 bg-white text-zinc-900 rounded-2xl font-black hover:bg-zinc-100 transition-all flex items-center justify-center gap-2"
+              >
+                <ClipboardList className="w-5 h-5" /> Print this order's receipt
+              </button>
             </div>
-          </div>
+          ))}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 no-print">
-          <button
-            onClick={() => { setTimeout(() => printReceipt('booking-receipt'), 100); }}
-            className="flex-1 py-5 bg-zinc-100 text-zinc-900 rounded-3xl font-black text-lg hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
-          >
-            <ClipboardList className="w-5 h-5" /> Print Receipt
-          </button>
-          <button
+        <button
             onClick={resetForm}
-            className="flex-1 py-5 bg-blue-500 text-white rounded-3xl font-black text-lg hover:bg-blue-600 transition-all shadow-xl shadow-blue-100"
+            className="w-full py-5 bg-blue-500 text-white rounded-3xl font-black text-lg hover:bg-blue-600 transition-all shadow-xl shadow-blue-100 no-print"
           >
             Done
-          </button>
-        </div>
+        </button>
       </div>
     );
   }
@@ -603,8 +599,8 @@ const UserBooking = () => {
 
             {step === 2 && (
               <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
-                <h2 className="text-xl font-black text-zinc-900">Laundry Quantity</h2>
-                <p className="text-sm text-zinc-500">Choose how many laundry loads/orders. You can add multiple laundry orders in one booking.</p>
+                <h2 className="text-xl font-black text-zinc-900">Services & Quantities</h2>
+                <p className="text-sm text-zinc-500">Each different service becomes its own order with a separate machine and timer. Repeated entries for the same service are combined.</p>
                 <div className="space-y-4">
                   {items.map((item, index) => (
                     <div key={index} className="bg-zinc-50 p-4 rounded-2xl border-2 border-zinc-200 space-y-3">

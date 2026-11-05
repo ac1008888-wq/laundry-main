@@ -538,7 +538,7 @@ const WalkInOrderForm = ({ machines, pricingMap, onOrderCreated }: WalkInOrderFo
           {/* Multi-Item Toggle */}
           <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border-2 border-zinc-200">
             <div>
-              <p className="text-sm font-black text-zinc-900">Add Multiple Items</p>
+              <p className="text-sm font-black text-zinc-900">Add Multiple Services</p>
               <p className="text-[10px] text-zinc-500">Combine multiple services in one order</p>
             </div>
             <button
@@ -562,7 +562,7 @@ const WalkInOrderForm = ({ machines, pricingMap, onOrderCreated }: WalkInOrderFo
           {showMultiItem ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-black text-zinc-900">Items</h3>
+                <h3 className="text-lg font-black text-zinc-900">Services</h3>
                 <button
                   type="button"
                   onClick={addItem}
@@ -1065,8 +1065,7 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
   const [walkInError, setWalkInError] = useState<string | null>(null);
   const [walkInPricing, setWalkInPricing] = useState<Record<string, PricingConfig>>({});
    const [showWalkInSuccess, setShowWalkInSuccess] = useState(false);
-   const [createdWalkInTransaction, setCreatedWalkInTransaction] = useState<Transaction | null>(null);
-   const [submittedWalkInItems, setSubmittedWalkInItems] = useState<Array<{ service_type: string; quantity: number; unit_price: number }>>([]);
+   const [createdWalkInTransactions, setCreatedWalkInTransactions] = useState<Transaction[] | null>(null);
    // Multi-order items state
    const [walkInItems, setWalkInItems] = useState<Array<{ service_type: string; quantity: number; unit_price: number }>>([
      { service_type: 'Wash & Fold (Clothes)', quantity: 1, unit_price: 0 },
@@ -1751,8 +1750,7 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
         : walkInForm;
 
       const result = await createWalkInOrder(body);
-      setSubmittedWalkInItems(walkInItems);
-      setCreatedWalkInTransaction(result);
+      setCreatedWalkInTransactions(result);
       setShowWalkInSuccess(true);
       setShowConfirmation(false);
       resetForm();
@@ -2636,7 +2634,7 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                     <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border-2 border-zinc-200">
                       <div>
                         <p className="text-sm font-black text-zinc-900">Add Multiple Items</p>
-                        <p className="text-[10px] text-zinc-500">Combine multiple services in one order</p>
+                        <p className="text-[10px] text-zinc-500">Create a separate order for each service</p>
                       </div>
                       <button
                         type="button"
@@ -2915,8 +2913,8 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                          </div>
                          {showMultiItem && walkInItems.length > 0 && (
                            <div className="flex justify-between items-center">
-                             <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Items</p>
-                             <p className="font-bold text-zinc-900">{walkInItems.length} item{walkInItems.length > 1 ? 's' : ''}</p>
+                             <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Separate orders</p>
+                             <p className="font-bold text-zinc-900">{new Set(walkInItems.map(item => item.service_type)).size}</p>
                            </div>
                          )}
                          <div className="flex justify-between items-center">
@@ -2962,52 +2960,45 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                )}
 
                {/* Success Popup Overlay */}
-              {showWalkInSuccess && createdWalkInTransaction && (
+              {showWalkInSuccess && createdWalkInTransactions && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50">
-                   <div className="bg-white rounded-2xl shadow-xl max-w-md w-full">
+                   <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
                      <div className="p-6 sm:p-8">
                       <div className="text-center mb-6">
                         <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
                           <Check className="text-emerald-600 w-8 h-8" />
                         </div>
-                        <h2 className="text-2xl font-black text-zinc-900 tracking-tighter">Order Created!</h2>
-                        <p className="text-zinc-500 font-medium mt-1">Your walk-in order has been successfully placed.</p>
+                        <h2 className="text-2xl font-black text-zinc-900 tracking-tighter">Order{createdWalkInTransactions.length > 1 ? 's' : ''} Created!</h2>
+                        <p className="text-zinc-500 font-medium mt-1">Each service has its own order and processing timer.</p>
                       </div>
 
                       <div className="bg-zinc-50 rounded-2xl p-5 mb-6 border-2 border-zinc-100 space-y-3">
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Reference ID</p>
-                          <p className="font-mono font-black text-blue-600">{createdWalkInTransaction.reference_number}</p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Customer</p>
-                          <p className="font-bold text-zinc-900">{createdWalkInTransaction.customer_name}</p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Items</p>
-                          <p className="font-bold text-zinc-900">{submittedWalkInItems.length} item{submittedWalkInItems.length > 1 ? 's' : ''}</p>
-                        </div>
-                        <div className="space-y-1 ml-2">
-                          {submittedWalkInItems.map((item, i) => (
-                            <div key={i} className="flex justify-between items-center text-xs">
-                              <span className="text-zinc-500">{item.service_type} (x{item.quantity})</span>
-                              <span className="font-bold text-zinc-900">₱{calculatePriceWithFallback(item.service_type, item.quantity, new Map(Object.entries(walkInPricing) as [string, PricingConfig][])).toLocaleString('en-PH')}</span>
+                        {createdWalkInTransactions.map((transaction, index) => (
+                          <div key={transaction.id} className={index > 0 ? 'pt-3 border-t border-zinc-200 space-y-2' : 'space-y-2'}>
+                            <div className="flex justify-between items-center">
+                              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Order {index + 1} · Reference</p>
+                              <p className="font-mono font-black text-blue-600">{transaction.reference_number}</p>
                             </div>
-                          ))}
-                        </div>
-                        {createdWalkInTransaction.delivery_method === 'delivery' && createdWalkInTransaction.delivery_fee > 0 && (
-                          <div className="flex justify-between items-center">
-                            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Delivery Fee</p>
-                            <p className="font-bold text-zinc-900">₱{createdWalkInTransaction.delivery_fee.toFixed(2)}</p>
+                            <div className="flex justify-between items-center">
+                              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Service</p>
+                              <p className="font-bold text-zinc-900">{transaction.service_type} (x{transaction.quantity})</p>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Amount</p>
+                              <p className="font-black text-blue-600">₱{transaction.total_price?.toFixed(2)}</p>
+                            </div>
+                            {transaction.delivery_fee > 0 && (
+                              <p className="text-right text-xs text-zinc-500">Includes one-time delivery fee of ₱{transaction.delivery_fee.toFixed(2)}</p>
+                            )}
                           </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Total</p>
-                          <p className="font-black text-blue-600">₱{createdWalkInTransaction.total_price?.toFixed(2)}</p>
+                        ))}
+                        <div className="flex justify-between items-center pt-3 border-t border-zinc-200">
+                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Customer</p>
+                          <p className="font-bold text-zinc-900">{createdWalkInTransactions[0].customer_name}</p>
                         </div>
                         <div className="flex justify-between items-center">
-                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Status</p>
-                          <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold capitalize">{createdWalkInTransaction.payment_status || 'unpaid'}</span>
+                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Payment</p>
+                          <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold capitalize">{createdWalkInTransactions[0].payment_status || 'unpaid'}</span>
                         </div>
                       </div>
 
@@ -3015,7 +3006,7 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                         <button
                           onClick={() => {
                             setShowWalkInSuccess(false);
-                            setCreatedWalkInTransaction(null);
+                            setCreatedWalkInTransactions(null);
                             setSubView('dashboard');
                           }}
                           className="w-full py-4 bg-zinc-900 text-white rounded-2xl font-black text-lg hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 flex items-center justify-center gap-2"
@@ -3026,7 +3017,7 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                         <button
                           onClick={() => {
                             setShowWalkInSuccess(false);
-                            setCreatedWalkInTransaction(null);
+                            setCreatedWalkInTransactions(null);
                           }}
                           className="w-full py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-base hover:bg-zinc-200 transition-all"
                         >
@@ -3412,9 +3403,14 @@ const AdminDashboard = ({ setView }: AdminDashboardProps) => {
                     </td>
                     <td className="px-3 sm:px-8 py-3 sm:py-6 hidden lg:table-cell">
                       <div className="flex flex-col">
-                        <span className="font-bold text-zinc-700 text-sm">
-                          {t.service_type} (x{t.quantity})
-                        </span>
+                        {(t.items.length > 0
+                          ? t.items
+                          : [{ service_type: t.service_type, quantity: t.quantity }]
+                        ).map((item, index) => (
+                          <span key={`${item.service_type}-${index}`} className="font-bold text-zinc-700 text-sm">
+                            {item.service_type} (x{item.quantity})
+                          </span>
+                        ))}
                         {t.service_type.toLowerCase().includes('hand wash') && t.handwash_proof_image && (
                           <div className="mt-1 flex items-center gap-2">
                             <img

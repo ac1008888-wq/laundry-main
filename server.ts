@@ -1514,6 +1514,15 @@ async function startServer() {
 
     const data = result.data;
     const items = data.items || [];
+    const groupedOrderItems = items.reduce<Array<{ service_type: string; quantity: number }>>((orders, item) => {
+      const existing = orders.find(order => order.service_type === item.service_type);
+      if (existing) {
+        existing.quantity += item.quantity || 1;
+      } else {
+        orders.push({ service_type: item.service_type, quantity: item.quantity || 1 });
+      }
+      return orders;
+    }, []);
     
     // Sanitize customer inputs to prevent XSS
     const sanitizedCustomerName = sanitizeInput(data.customer_name);
@@ -1535,8 +1544,11 @@ async function startServer() {
      }
      
      // Hand wash orders should NOT be assigned to any machine
-    const isHandWash = data.service_type.toLowerCase().includes('hand wash');
-    const machineId = isHandWash ? null : (data.machine_id || null);
+    const primaryServiceType = groupedOrderItems[0]?.service_type || data.service_type;
+    const isHandWash = groupedOrderItems.length > 0
+      ? groupedOrderItems.every(item => item.service_type.toLowerCase().includes('hand wash'))
+      : data.service_type.toLowerCase().includes('hand wash');
+    const machineId = groupedOrderItems.length > 1 || isHandWash ? null : (data.machine_id || null);
 
     // Validate machine availability before creating the transaction
     if (machineId) {
@@ -1566,6 +1578,75 @@ async function startServer() {
       }
       
       // Retry logic for reference number collision (max 3 attempts)
+      if (groupedOrderItems.length > 1) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const createdTransactions: any[] = [];
+          try {
+            db.prepare("BEGIN TRANSACTION").run();
+
+            for (const [index, item] of groupedOrderItems.entries()) {
+              const referenceNumber = generateReferenceNumber();
+              const servicePrice = calculatePrice(item.service_type, item.quantity);
+              const itemDeliveryFee = index === 0 ? resolvedDeliveryFee : 0;
+              const totalPrice = servicePrice + itemDeliveryFee;
+              const insertResult = db.prepare(`
+                INSERT INTO transactions (
+                  reference_number, customer_name, customer_phone, customer_email, service_type,
+                  quantity, special_instructions, appointment_date, appointment_time,
+                  delivery_method, address, branch, total_price, delivery_fee, machine_id, payment_method, weight
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+              `).run(
+                referenceNumber,
+                sanitizedCustomerName,
+                sanitizedCustomerPhone,
+                sanitizedEmail || null,
+                item.service_type,
+                item.quantity,
+                sanitizedInstructions || "",
+                data.appointment_date || "",
+                data.appointment_time || "",
+                data.delivery_method || "",
+                sanitizedCombinedAddress || "",
+                null,
+                totalPrice,
+                itemDeliveryFee,
+                data.payment_method || "cash",
+                data.weight || null
+              );
+              const transactionId = Number(insertResult.lastInsertRowid);
+              const unitPrice = servicePrice / item.quantity;
+              db.prepare(`
+                INSERT INTO transaction_items (
+                  transaction_id, service_type, quantity, unit_price, total_price
+                ) VALUES (?, ?, ?, ?, ?)
+              `).run(transactionId, item.service_type, item.quantity, unitPrice, servicePrice);
+              const transaction = db.prepare("SELECT * FROM transactions WHERE id = ?").get(transactionId) as any;
+              createdTransactions.push({
+                ...transaction,
+                branch: transaction.branch ?? null,
+                delivery_branch: transaction.branch ?? null,
+                items: [{ service_type: item.service_type, quantity: item.quantity, unit_price: unitPrice }],
+              });
+            }
+
+            db.prepare("COMMIT").run();
+            console.log(`[API] Created ${createdTransactions.length} separate transactions for multi-service booking`);
+            return res.status(201).json(apiResponse(true, createdTransactions));
+          } catch (error: any) {
+            db.prepare("ROLLBACK").run();
+            const isDupRef = /UNIQUE constraint failed/i.test(error?.message || '') && /reference_number/i.test(error?.message || '');
+            if (isDupRef && attempt < 2) {
+              console.warn(`[API] Reference number collision on multi-service booking attempt ${attempt + 1}, retrying...`);
+              continue;
+            }
+            console.error("[API] Multi-service transaction creation error:", error);
+            return res.status(500).json(apiResponse(false, undefined, "Failed to create booking"));
+          }
+        }
+        return res.status(500).json(apiResponse(false, undefined, "Failed to create booking"));
+      }
+
       let transactionId: number | null = null;
     let reference_number = '';
     let total_price = 0;
@@ -1622,7 +1703,7 @@ async function startServer() {
             sanitizedCustomerName,
             sanitizedCustomerPhone,
             sanitizedEmail || null,
-            data.service_type,
+            primaryServiceType,
             items.length > 0 ? items.reduce((sum, item) => sum + (item.quantity || 1), 0) : (data.quantity || 1),
             sanitizedInstructions || "",
             data.appointment_date || "",
@@ -1733,6 +1814,15 @@ async function startServer() {
 
     const data = result.data;
     const items = data.items || [];
+    const groupedOrderItems = items.reduce<Array<{ service_type: string; quantity: number }>>((orders, item) => {
+      const existing = orders.find(order => order.service_type === item.service_type);
+      if (existing) {
+        existing.quantity += item.quantity || 1;
+      } else {
+        orders.push({ service_type: item.service_type, quantity: item.quantity || 1 });
+      }
+      return orders;
+    }, []);
     
     // Sanitize customer inputs to prevent XSS
     const sanitizedCustomerName = sanitizeInput(data.customer_name);
@@ -1749,8 +1839,8 @@ async function startServer() {
       // For walk-in orders, default to today's date
     const today = new Date().toISOString().split('T')[0];
 
-    const isHandWash = items.length > 0
-      ? items.some(item => item.service_type.toLowerCase().includes('hand wash'))
+    const isHandWash = groupedOrderItems.length > 0
+      ? groupedOrderItems.every(item => item.service_type.toLowerCase().includes('hand wash'))
       : data.service_type.toLowerCase().includes('hand wash');
     
     let assignedMachineId: number | null = data.machine_id ?? null;
@@ -1778,7 +1868,7 @@ async function startServer() {
      // Resolve delivery fee once (address-based when possible, else fixed pricing fee)
      let resolvedDeliveryFee = 0;
      if (data.delivery_method === 'delivery') {
-       const firstService = items.length > 0 ? items[0].service_type : data.service_type;
+        const firstService = groupedOrderItems[0]?.service_type || data.service_type;
         if (sanitizedCombinedAddress) {
           const quote = await calculateDeliveryFeeByAddress(sanitizedCombinedAddress);
           resolvedDeliveryFee = quote.destination ? quote.fee : getDeliveryFee(firstService);
@@ -1787,6 +1877,111 @@ async function startServer() {
         }
       }
   
+      if (groupedOrderItems.length > 1) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const createdTransactions: any[] = [];
+          try {
+            db.prepare("BEGIN TRANSACTION").run();
+
+            let machineAssigned = false;
+            for (const [index, item] of groupedOrderItems.entries()) {
+              const isItemHandWash = item.service_type.toLowerCase().includes('hand wash');
+              const itemMachineId = !isItemHandWash && !machineAssigned ? assignedMachineId : null;
+              if (itemMachineId) machineAssigned = true;
+
+              const referenceNumber = generateReferenceNumber();
+              const servicePrice = calculatePrice(item.service_type, item.quantity);
+              const itemDeliveryFee = index === 0 ? resolvedDeliveryFee : 0;
+              const totalPrice = servicePrice + itemDeliveryFee;
+              const initialStatus = itemMachineId ? "accepted" : "pending";
+              const insertResult = db.prepare(`
+                INSERT INTO transactions (
+                  reference_number, customer_name, customer_phone, customer_email, service_type,
+                  quantity, special_instructions, appointment_date, appointment_time,
+                  delivery_method, address, branch, total_price, delivery_fee, status, payment_status,
+                  machine_id, payment_method, weight
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `).run(
+                referenceNumber,
+                sanitizedCustomerName,
+                sanitizedCustomerPhone,
+                sanitizedEmail || null,
+                item.service_type,
+                item.quantity,
+                sanitizedInstructions || "",
+                data.appointment_date || today,
+                data.appointment_time || "",
+                data.delivery_method || "",
+                sanitizedCombinedAddress || "",
+                null,
+                totalPrice,
+                itemDeliveryFee,
+                initialStatus,
+                data.payment_status || "unpaid",
+                itemMachineId,
+                data.payment_method || "cash",
+                data.weight || null
+              );
+              const transactionId = Number(insertResult.lastInsertRowid);
+              const unitPrice = servicePrice / item.quantity;
+              db.prepare(`
+                INSERT INTO transaction_items (
+                  transaction_id, service_type, quantity, unit_price, total_price
+                ) VALUES (?, ?, ?, ?, ?)
+              `).run(transactionId, item.service_type, item.quantity, unitPrice, servicePrice);
+
+              if (itemMachineId) {
+                db.prepare("UPDATE machines SET status = 'in-use', remaining_time = 2700, drying_time = 0, current_transaction_id = ? WHERE id = ?").run(transactionId, itemMachineId);
+              } else {
+                const lastPosition = db.prepare(
+                  "SELECT COALESCE(MAX(position), 0) as max_pos FROM queue WHERE status = 'waiting'"
+                ).get() as { max_pos: number };
+                const availableMachines = (db.prepare("SELECT COUNT(*) as count FROM machines WHERE status = 'available'").get() as { count: number }).count;
+                const newPosition = lastPosition.max_pos + 1;
+                const estimatedWait = availableMachines > 0
+                  ? (newPosition / availableMachines) * 2700
+                  : newPosition * 2700;
+                const estimatedStart = new Date(Date.now() + estimatedWait * 1000);
+                const estimatedEnd = new Date(estimatedStart.getTime() + 2700 * 1000);
+                db.prepare(`
+                  INSERT INTO queue (transaction_id, position, estimated_wait_time, estimated_start_time, estimated_end_time, status)
+                  VALUES (?, ?, ?, ?, ?, 'waiting')
+                `).run(
+                  transactionId,
+                  newPosition,
+                  Math.round(estimatedWait),
+                  estimatedStart.toISOString(),
+                  estimatedEnd.toISOString()
+                );
+              }
+
+              const transaction = db.prepare("SELECT * FROM transactions WHERE id = ?").get(transactionId) as any;
+              createdTransactions.push({
+                ...transaction,
+                branch: transaction.branch ?? null,
+                delivery_branch: transaction.branch ?? null,
+                items: [{ service_type: item.service_type, quantity: item.quantity, unit_price: unitPrice }],
+              });
+            }
+
+            db.prepare("COMMIT").run();
+            console.log(`[API] Created ${createdTransactions.length} separate walk-in transactions for multi-service order`);
+            return res.status(201).json(apiResponse(true, createdTransactions));
+          } catch (error: any) {
+            db.prepare("ROLLBACK").run();
+            const isDupRef = /UNIQUE constraint failed/i.test(error?.message || '') && /reference_number/i.test(error?.message || '');
+            if (isDupRef && attempt < 2) {
+              console.warn(`[API] Reference number collision on multi-service walk-in attempt ${attempt + 1}, retrying...`);
+              continue;
+            }
+            console.error("[API] Multi-service walk-in creation error:", error);
+            return res.status(500).json(apiResponse(false, undefined, "Failed to create walk-in order"));
+          }
+        }
+        return res.status(500).json(apiResponse(false, undefined, "Failed to create walk-in order"));
+      }
+
       // Retry logic for reference number collision (max 3 attempts)
       let newTransactionId: number | null = null;
     let reference_number = '';
