@@ -18,7 +18,6 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { calculatePrice as calculatePriceShared, rowToConfig, FALLBACK_PRICING } from "./src/utils/sharedPricing";
 import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS } from "./src/utils/reviewPhotoValidation";
-import nodemailer from "nodemailer";
 
 // Load environment variables
 import dotenv from "dotenv";
@@ -299,19 +298,6 @@ addColumnIfNotExists("reviews", "photos", "TEXT"); // JSON array of image URLs
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_items_transaction ON transaction_items(transaction_id);
   `);
-
-  // Email verifications table for booking flow
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS email_verifications (
-       id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email VARCHAR(255) NOT NULL,
-       token TEXT NOT NULL,
-       expires_at DATETIME NOT NULL,
-      verified INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications(email);`);
 
   // Add queue-related columns to machines if not exist
    addColumnIfNotExists("machines", "avg_cycle_time", "INTEGER DEFAULT 2700");
@@ -1166,92 +1152,6 @@ async function startServer() {
    });
 
   // ============================================
-  // Email Verification (booking flow)
-  // ============================================
-  const emailTransporter = (() => {
-    const host = process.env.SMTP_HOST;
-    if (!host) return null;
-    const port = parseInt(process.env.SMTP_PORT || "587", 10);
-    const secure = process.env.SMTP_SECURE === undefined
-      ? port === 465
-      : process.env.SMTP_SECURE === "true";
-    return nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
-    });
-  })();
-
-   app.post("/api/verify-email/send", async (req, res) => {
-     try {
-       const email = String(req.body?.email || "").trim();
-       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-         return res.status(400).json(apiResponse(false, undefined, "Invalid email"));
-       }
-       if (!emailTransporter) {
-         return res.status(503).json(apiResponse(false, undefined, "Email delivery is not configured. Please contact the laundry shop."));
-       }
-       // Per-email rate limiting: max 3 codes per 10 minutes
-       const recent = db.prepare("SELECT COUNT(*) as c FROM email_verifications WHERE email = ? AND created_at >= datetime('now', '-10 minutes')").get(email) as { c: number };
-       if (recent.c >= 3) {
-         return res.status(429).json(apiResponse(false, undefined, "Too many verification requests. Please try again later."));
-       }
-       const code = String(Math.floor(100000 + Math.random() * 900000));
-       const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-       const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-       const result = db.prepare("INSERT INTO email_verifications (email, token, expires_at) VALUES (?, ?, ?)").run(email, codeHash, expires);
-       try {
-         await emailTransporter.sendMail({
-           from: process.env.SMTP_FROM || process.env.SMTP_USER,
-           to: email,
-           subject: "Your verification code",
-           text: `Your verification code is: ${code}. It expires in 10 minutes.`,
-         });
-       } catch (error) {
-         db.prepare("UPDATE email_verifications SET verified = 1 WHERE id = ?").run(result.lastInsertRowid);
-         console.error("[Email] Verification email delivery failed:", error);
-         return res.status(502).json(apiResponse(false, undefined, "Could not deliver the verification email. Please try again later."));
-       }
-       res.json(apiResponse(true, { sent: true }));
-     } catch (e) {
-       console.error(e);
-       res.status(500).json(apiResponse(false, undefined, "Failed to send verification"));
-     }
-   });
-
-   app.post("/api/verify-email/confirm", (req, res) => {
-     try {
-       const email = String(req.body?.email || "").trim();
-       const code = String(req.body?.code || "").trim();
-       const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-        const row = db.prepare("SELECT * FROM email_verifications WHERE email = ? AND token = ? AND verified = 0 ORDER BY id DESC LIMIT 1").get(email, codeHash) as any;
-       if (!row) return res.status(400).json(apiResponse(false, undefined, "Invalid code"));
-       if (new Date(row.expires_at) < new Date()) return res.status(400).json(apiResponse(false, undefined, "Code expired"));
-       // Single use: mark verified
-       db.prepare("UPDATE email_verifications SET verified = 1 WHERE id = ?").run(row.id);
-       // Invalidate any other unused codes for this email
-       db.prepare("UPDATE email_verifications SET verified = 1 WHERE email = ? AND id != ? AND verified = 0").run(email, row.id);
-       res.json(apiResponse(true, { verified: true }));
-     } catch (e) {
-       console.error(e);
-       res.status(500).json(apiResponse(false, undefined, "Verification failed"));
-     }
-   });
-
-  app.get("/api/verify-email/status", (req, res) => {
-    try {
-      const email = String(req.query.email || "").trim();
-      const row = db.prepare("SELECT verified FROM email_verifications WHERE email = ? ORDER BY id DESC LIMIT 1").get(email) as any;
-      res.json(apiResponse(true, { verified: !!row?.verified }));
-    } catch (e) {
-      res.status(500).json(apiResponse(false, undefined, "Status check failed"));
-    }
-  });
-
-  // ============================================
   // Admin Authentication
   // ============================================
 
@@ -1539,13 +1439,6 @@ async function startServer() {
         ? `${sanitizedAddress}, ${sanitizedBranch}`
         : sanitizedAddress;
       const sanitizedInstructions = data.special_instructions ? sanitizeInput(data.special_instructions) : undefined;
-      // Enforce email verification server-side if email verification is required
-     if (sanitizedEmail) {
-       const verifiedRow = db.prepare("SELECT id FROM email_verifications WHERE email = ? AND verified = 1 ORDER BY id DESC LIMIT 1").get(sanitizedEmail);
-       if (!verifiedRow) {
-         return res.status(400).json(apiResponse(false, undefined, "Email not verified"));
-       }
-     }
      
      // Hand wash orders should NOT be assigned to any machine
     const primaryServiceType = groupedOrderItems[0]?.service_type || data.service_type;

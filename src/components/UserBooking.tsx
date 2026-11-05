@@ -116,28 +116,6 @@ const UserBooking = () => {
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [loading] = useState(false);
-  const [emailCode, setEmailCode] = useState(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return typeof parsed.emailCode === 'string' ? parsed.emailCode : '';
-      }
-    } catch {}
-    return '';
-  });
-  const [emailVerified, setEmailVerified] = useState(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return parsed.emailVerified === true;
-      }
-    } catch {}
-    return false;
-  });
-  const [sendingCode, setSendingCode] = useState(false);
-  const [verifyingCode, setVerifyingCode] = useState(false);
   const [dynamicPricing, setDynamicPricing] = useState<Record<string, any>>({});
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [deliveryQuoteLoading, setDeliveryQuoteLoading] = useState(false);
@@ -200,9 +178,9 @@ const UserBooking = () => {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, formData, items, emailCode, emailVerified }));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, formData, items }));
     } catch {}
-  }, [step, formData, items, emailCode, emailVerified]);
+  }, [step, formData, items]);
 
   // Prevent background scroll when confirmation modal is open
   useEffect(() => {
@@ -534,65 +512,11 @@ const UserBooking = () => {
                     className={`w-full p-5 bg-zinc-50 border-4 rounded-3xl focus:bg-white focus:border-blue-500 outline-none transition-all font-bold text-lg ${formErrors.customer_email ? 'border-rose-500' : 'border-transparent'}`}
                     placeholder="you@example.com"
                     value={formData.customer_email}
-                    onChange={e => { updateFormData({ customer_email: e.target.value }); setEmailVerified(false); setEmailCode(''); if (formErrors.customer_email) setFormErrors(p => ({ ...p, customer_email: '' })); }}
+                    onChange={e => { updateFormData({ customer_email: e.target.value }); if (formErrors.customer_email) setFormErrors(p => ({ ...p, customer_email: '' })); }}
                     aria-label="Customer email address"
                     aria-invalid={!!formErrors.customer_email}
                   />
                    {formErrors.customer_email && <p className="text-[10px] text-rose-600 font-bold mt-1">{formErrors.customer_email}</p>}
-                   {formData.customer_email.trim() && isValidEmail(formData.customer_email) && (
-                     <div className="mt-3 space-y-2">
-                       {!emailVerified ? (
-                         <>
-                           <button
-                             type="button"
-                             disabled={sendingCode}
-                             onClick={async () => {
-                               setSendingCode(true);
-                               try {
-                                 const res = await fetch('/api/verify-email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: formData.customer_email }) });
-                                 const data = await res.json();
-                                 if (data.success) addToast({ type: 'success', message: 'Verification code sent to your email' });
-                                 else addToast({ type: 'error', message: data.error || 'Failed to send code' });
-                               } catch { addToast({ type: 'error', message: 'Failed to send code' }); }
-                               finally { setSendingCode(false); }
-                             }}
-                             className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm disabled:opacity-50"
-                           >
-                             {sendingCode ? 'Sending...' : 'Send verification code'}
-                           </button>
-                           <div className="flex gap-2">
-                             <input
-                               type="text"
-                               maxLength={6}
-                               value={emailCode}
-                               onChange={e => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                               placeholder="Enter 6-digit code"
-                               className="flex-1 p-3 bg-zinc-50 border-2 border-transparent rounded-2xl font-bold"
-                             />
-                             <button
-                               type="button"
-                               disabled={verifyingCode || emailCode.length !== 6}
-                               onClick={async () => {
-                                 setVerifyingCode(true);
-                                 try {
-                                   const res = await fetch('/api/verify-email/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: formData.customer_email, code: emailCode }) });
-                                   const data = await res.json();
-                                   if (data.success) { setEmailVerified(true); addToast({ type: 'success', message: 'Email verified' }); }
-                                   else addToast({ type: 'error', message: data.error || 'Invalid code' });
-                                 } catch { addToast({ type: 'error', message: 'Verification failed' }); }
-                                 finally { setVerifyingCode(false); }
-                               }}
-                               className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm disabled:opacity-50"
-                             >
-                               {verifyingCode ? 'Verifying...' : 'Verify'}
-                             </button>
-                           </div>
-                         </>
-                       ) : (
-                         <p className="text-sm font-bold text-emerald-600">✓ Email verified</p>
-                       )}
-                     </div>
-                   )}
                  </div>
               </motion.div>
             )}
